@@ -14,6 +14,5 @@ INSERT INTO public.sales_daily (date, region, category, revenue, orders) VALUES
 ('2025-09-01','West','Fashion',40500.00,190), 
 ('2025-09-02','North','Electronics',132500.00,332), 
 ('2025-09-02','West','Fashion',45500.00,210), 
-('2025-09-02','East','Grocery',62000.00,870),
-ON CONFLICT (date, region, category) DO NOTHING;
+('2025-09-02','East','Grocery',62000.00,870);
 
