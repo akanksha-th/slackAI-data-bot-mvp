@@ -1,5 +1,5 @@
 from src.services.llm_service import run_agent
-from src.services.cache import CacheService
+from src.services.cache_service import CacheService
 
 cache = CacheService()
 

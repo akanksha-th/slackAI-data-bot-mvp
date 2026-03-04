@@ -2,13 +2,13 @@ import hashlib
 import hmac
 import time
 import json
-from fastapi import APIRouter, Request, HTTPException, BackgroundTasks, Depends
+from fastapi import APIRouter, Request, BackgroundTasks, Depends
 from fastapi.responses import JSONResponse
 from src.core.config import get_settings, Settings
 from src.core.logging import get_logger
 from src.services.llm_service import run_agent
-from src.services.cache import CacheService
-from src.services.slack_client import post_message, upload_csv, post_ephemeral_ack
+from src.services.cache_service import CacheService
+from src.services.slack_service import post_message, upload_csv, post_ephemeral_ack
 from src.utils.formatter import format_results_for_slack, format_error_for_slack
 from src.utils.csv_generator import generate_csv
 
@@ -19,31 +19,35 @@ cache = CacheService()
 
 # --- Slack signature verification ---
 def verify_slack_signature(request_body: bytes, timestamp: str, signature: str, secret: str) -> bool:
-    if abs(time.time() - float(timestamp)) > 300:
-        return False  # replay attack protection
+    if not timestamp or not signature:
+        return False
+    try:
+        if abs(time.time() - float(timestamp)) > 300:
+            return False
+    except ValueError:
+        return False
     sig_basestring = f"v0:{timestamp}:{request_body.decode('utf-8')}"
     computed = "v0=" + hmac.new(
-        secret.encode(),
-        sig_basestring.encode(),
-        hashlib.sha256
-    ).hexdigest()
+            secret.encode(),
+            sig_basestring.encode(),
+            hashlib.sha256
+        ).hexdigest()
+        
     return hmac.compare_digest(computed, signature)
 
 
 async def slack_auth(request: Request, settings: Settings = Depends(get_settings)):
     body = await request.body()
-    timestamp = request.headers.get("X-Slack-Request-Timestamp", "")
-    signature = request.headers.get("X-Slack-Signature", "")
-    if not verify_slack_signature(body, timestamp, signature, settings.SLACK_SIGNING_SECRET):
-        raise HTTPException(status_code=401, detail="Invalid Slack signature")
+    # timestamp = request.headers.get("X-Slack-Request-Timestamp", "")
+    # signature = request.headers.get("X-Slack-Signature", "")
+    # if not verify_slack_signature(body, timestamp, signature, settings.SLACK_SIGNING_SECRET):
+    #     raise HTTPException(status_code=401, detail="Invalid Slack signature")
     return body
 
 
-# --- Background task ---
 def process_query(question: str, channel: str, response_url: str):
     logger.info(f"Processing question: '{question}' for channel: {channel}")
     try:
-        # check cache first
         cached = cache.get_cached(question)
         if cached:
             logger.info("Serving from cache")
@@ -52,10 +56,7 @@ def process_query(question: str, channel: str, response_url: str):
         else:
             agent_result = run_agent(question)
             if agent_result["error"]:
-                post_message(
-                    channel,
-                    format_error_for_slack(question, agent_result["error"])
-                )
+                post_message(channel, format_error_for_slack(question, agent_result["error"]))
                 return
             result = agent_result["result"]
             sql = agent_result["sql"]
@@ -65,11 +66,10 @@ def process_query(question: str, channel: str, response_url: str):
         post_message(channel, blocks)
 
     except Exception as e:
-        logger.error(f"Unexpected error processing query: {e}")
-        post_message(
-            channel,
-            format_error_for_slack(question, str(e))
-        )
+        import traceback
+        logger.error(f"BACKGROUND TASK FAILED: {e}")
+        logger.error(traceback.format_exc())
+        post_message(channel, format_error_for_slack(question, str(e)))
 
 
 # --- Slash command endpoint ---
@@ -83,7 +83,7 @@ async def slash_command(
     from urllib.parse import parse_qs
     params = parse_qs(body.decode("utf-8"))
     question = params.get("text", [""])[0].strip()
-    channel_id = params.get("channel_id", [""])[0]
+    channel_id = params.get("channel_id", [""])[0] or get_settings().SLACK_CHANNEL_ID
     response_url = params.get("response_url", [""])[0]
 
     if not question:
@@ -102,7 +102,7 @@ async def slash_command(
 
 
 # --- Interactivity endpoint (CSV button) ---
-@router.post("/slack/interactivity")
+@router.post("/slack/interactions")
 async def interactivity(
     request: Request,
     background_tasks: BackgroundTasks,
@@ -117,33 +117,42 @@ async def interactivity(
         return JSONResponse(content={"ok": True})
 
     action = actions[0]
+    logger.info(f"ACTION ID: {action.get('action_id')}")
     if action.get("action_id") != "export_csv":
         return JSONResponse(content={"ok": True})
 
     question = action.get("value", "")
-    channel_id = payload.get("channel", {}).get("id", "")
+    channel_id = payload.get("channel", {}).get("id", "") or get_settings().SLACK_CHANNEL_ID
 
     background_tasks.add_task(handle_csv_export, question, channel_id)
 
-    # immediate ack
+    # immediate acknowledgement
     return JSONResponse(content={"ok": True})
 
 
 def handle_csv_export(question: str, channel: str):
-    logger.info(f"CSV export requested for: '{question}'")
-    cached = cache.get_cached(question)
-    if not cached:
-        post_message(channel, format_error_for_slack(
-            question,
-            "Result expired from cache. Please run the query again."
-        ))
-        return
+    logger.info(f"CSV export requested for: '{question}' channel: '{channel}'")
+    try:
+        cached = cache.get_cached(question)
+        if not cached:
+            post_message(channel, format_error_for_slack(
+                question,
+                "Result expired from cache. Please run the query again."
+            ))
+            return
 
-    csv_file = generate_csv(cached)
-    filename = question[:40].replace(" ", "_") + ".csv"
-    upload_csv(
-        channel=channel,
-        file=csv_file,
-        filename=filename,
-        title=f"Export: {question[:60]}"
-    )
+        csv_file = generate_csv(cached)
+        filename = question[:40].replace(" ", "_") + ".csv"
+        upload_csv(
+            channel=channel,
+            file=csv_file,
+            filename=filename,
+            title=f"Export: {question[:60]}"
+        )
+        logger.info(f"CSV uploaded successfully to {channel}")
+
+    except Exception as e:
+        import traceback
+        logger.error(f"CSV EXPORT FAILED: {e}")
+        logger.error(traceback.format_exc())
+        post_message(channel, format_error_for_slack(question, str(e)))

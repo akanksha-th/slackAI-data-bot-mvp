@@ -10,7 +10,7 @@ Columns:
     - category      (TEXT)          : product category eg: 'Grocery'
     - revenue       (NUMERIC 12,2)  : total revenue for that day/region/category
     - orders        (INTEGER)       : number of orders placed
-    - created_at    (IMESTAMPTZ)    : row creation timestamp
+    - created_at    (TIMESTAMPTZ)    : row creation timestamp
 
 Rules:
     - Output ONLY the SQL query in postgres environment, no explanations, no markdowns, no backticks.

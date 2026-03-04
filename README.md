@@ -13,37 +13,7 @@ The bot replies instantly with a formatted table and an **Export CSV** button.
 
 ## Architecture
 
-```
-User (Slack)
-    │  /ask-data <question>
-    ▼
-FastAPI  ──── immediate ACK (200) ──────────────▶ Slack
-    │
-    │  BackgroundTask
-    ▼
-Redis Cache ──── HIT ─────────────────────────▶ Formatter
-    │ MISS                                           │
-    ▼                                               │
-LangGraph Agent                                     │
-  [generate_sql]  ◀── Groq LLM (llama3-70b)        │
-  [execute_sql]   ── Postgres (read-only user)      │
-  [retry]         ◀── on SQL error (max 1 retry)    │
-    │                                               │
-    └──── store in Redis (TTL 2hr) ─────────────────┘
-                                                    │
-                                                    ▼
-                                            Slack Block Kit
-                                        (table + Export CSV button)
-
-On Export CSV click:
-    Slack ──▶ FastAPI /slack/interact
-               │  pull from Redis (or re-query)
-               ▼
-           Generate CSV in memory
-               │
-               ▼
-           Upload to Slack channel
-```
+![Alt text](architecture.png)
 
 ---
 
@@ -54,15 +24,13 @@ slack-data-bot/
 ├── docker/
 │   ├── Dockerfile
 │   ├── docker-compose.yml   # Postgres + Redis + App
-│   └── init.sql             # Schema, seed data, read-only user
+│   └── init.sql             # Seed data
 ├── src/
 │   ├── api/
 │   │   ├── main.py          # FastAPI app factory
-│   │   ├── routes.py        # /slack/command, /slack/interact
-│   │   └── dependencies.py  # Slack signature verification
+│   │   └── routes.py        # /slack/command, /slack/interact
 │   ├── schemas/
-│   │   ├── slack.py         # SlashCommandPayload, InteractionPayload
-│   │   └── query.py         # QueryResult
+│   │   └── slack.py         # SlashCommandPayload, InteractivityPayload
 │   ├── services/
 │   │   ├── llm_service.py   # LangGraph agent (generate → execute → retry)
 │   │   ├── cache_service.py # Redis get/set with TTL
@@ -71,17 +39,21 @@ slack-data-bot/
 │   │   ├── prompts.py       # System prompt + user prompt builder
 │   │   ├── db.py            # SQLAlchemy engine + execute_query
 │   │   ├── formatter.py     # Slack Block Kit builder
-│   │   └── csv_export.py    # rows → CSV bytes
+│   │   └── csv_generator.py    # rows → CSV bytes
 │   └── core/
 │       ├── config.py        # pydantic-settings + lru_cache
 │       └── logging.py       # Structured stdout logger
 ├── tests/
-│   ├── test_sql_agent.py
-│   ├── test_cache.py
-│   └── test_routes.py
+│   └── test_pipeline.py
+├── .env
 ├── .env.example
-├── app.py                   # Local dev entry point
-└── requirements.txt
+├── .python-version
+├── pyproject.toml
+├── .gitignore
+├── uv.lock
+├── LICENSE
+├── SYSTEM_DESIGN.md
+└── README.md
 ```
 
 ---
@@ -118,9 +90,10 @@ Copy the `https://xxxx.ngrok.io` URL.
 1. Go to [api.slack.com/apps](https://api.slack.com/apps) → Create New App
 2. **Slash Commands** → Create `/ask-data` → Request URL: `https://xxxx.ngrok.io/slack/command`
 3. **Interactivity** → Enable → Request URL: `https://xxxx.ngrok.io/slack/interact`
-4. **OAuth & Permissions** → Add scopes: `chat:write`, `files:write`, `commands`
+4. **OAuth & Permissions** → Add scopes: `chat:write`, `files:write`, `commands`, `im:write`
 5. Install to workspace → copy Bot Token into `.env`
 6. Copy Signing Secret from Basic Information → `.env`
+7. From the workspace, get Channel_ID → `.env`
 
 ### 5. Try it
 
@@ -138,7 +111,7 @@ Copy the `https://xxxx.ngrok.io` URL.
 LangGraph lets us model the generate→execute→retry flow as an explicit state machine. The retry node feeds the SQL error message back to the LLM, which corrects the query without any manual string wrangling. This is cleaner than a try/except wrapper and trivially extensible (e.g. adding a multi-turn conversational node later).
 
 **Why cache by question, not by generated SQL?**
-The same question always maps to the same intent. Caching the normalized question string means a cache hit skips both the LLM call (latency + cost) and the DB query. Cache key = SHA-256 of lowercase-stripped question, stored in Redis with a 2hr TTL.
+The same question always maps to the same intent. Caching the normalized question string means a cache hit skips both the LLM call (latency + cost) and the DB query. Cache key = -MD5 of lowercase-stripped question, stored in Redis with a 2hr TTL.
 
 **Why immediate ACK + BackgroundTask?**
 Slack kills slash commands that don't respond within 3 seconds. FastAPI's `BackgroundTasks` lets us return HTTP 200 immediately, then do the real work (LLM + DB) asynchronously and post back via the Slack API. No job queue needed for this scale.
@@ -157,14 +130,6 @@ The LLM could theoretically generate `DROP TABLE` or `DELETE` if the prompt leak
 - **Horizontal scaling**: the app is stateless; add a load balancer + multiple replicas
 - **CI/CD**: GitHub Actions running pytest on every PR
 
----
-
-## Running Tests
-
-```bash
-pip install -r requirements.txt
-pytest tests/ -v
-```
 
 ---
 
@@ -180,3 +145,9 @@ pytest tests/ -v
 | Slack SDK | slack-sdk 3.x |
 | Config | pydantic-settings |
 | Containers | Docker + Docker Compose |
+
+---
+
+## Acknowledgement
+
+- Assignment - evvolv.ai

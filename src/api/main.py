@@ -1,5 +1,5 @@
 from fastapi import FastAPI
-from src.api.routes.slack import router as slack_router
+from src.api.routes import router as slack_router
 from src.core.logging import get_logger
 
 logger = get_logger(__name__)
@@ -10,7 +10,7 @@ app = FastAPI(
     version="1.0.0"
 )
 
-app.include_router(slack_router, prefix="/slack", tags=["slack"])
+app.include_router(slack_router, prefix="", tags=["slack"])
 
 
 @app.get("/health")

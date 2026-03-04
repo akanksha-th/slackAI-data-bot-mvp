@@ -16,6 +16,8 @@ llm = ChatGroq(
     temperature=0
 )
 
+MAX_RETRIES = 1
+
 # ——— LangGraph State ———
 class AgentState(TypedDict):
     question: str
@@ -50,8 +52,14 @@ def execute_sql(state: AgentState) -> AgentState:
         logger.warning(f"SQL execution failed: {e}")
         return {**state, "result": [], "error": str(e)}
 
-# def generate_sql(state: AgentState) -> AgentState:
-#     ...
+def should_retry(state: AgentState) -> str:
+    if state["error"] and state["retry_count"] < MAX_RETRIES:
+        logger.info(f"Retrying... (attempt {state['retry_count'] + 1}/{MAX_RETRIES})")
+        return "retry"
+    return "done"
+
+def increment_retry(state: AgentState) -> AgentState:
+    return {**state, "retry_count": state["retry_count"] + 1}
 
 # ——— Build Graph ———
 def _build_graph() -> Any:
@@ -62,11 +70,11 @@ def _build_graph() -> Any:
 
     graph.set_entry_point("generate_sql")
     graph.add_edge("generate_sql", "execute_sql")
-    # graph.add_conditional_edges(
-    #     "execute_sql",
-    #     should_retry,
-    #     {"retry": "generate_sql", "done": END}
-    # )
+    graph.add_conditional_edges(
+        "execute_sql",
+        should_retry,
+        {"retry": "generate_sql", "done": END}
+    )
     return graph.compile()
 
 agent = _build_graph()

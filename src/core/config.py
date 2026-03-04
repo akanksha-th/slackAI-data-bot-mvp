@@ -19,6 +19,8 @@ class Settings(BaseSettings):
 
     GROQ_API_KEY: str
     MODEL_NAME: str = "llama-3.3-70b-versatile"
+
+    SLACK_CHANNEL_ID: str = ""
     SLACK_BOT_TOKEN: str
     SLACK_SIGNING_SECRET: str
 

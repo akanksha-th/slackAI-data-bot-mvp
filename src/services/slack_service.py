@@ -18,10 +18,10 @@ def post_message(channel: str, blocks: list[dict], text: str = 'Query result') -
             text=text
         )
     except SlackApiError as e:
-        logger.error()
+        logger.error(e)
         raise
 
-def post_ephermeral_ack(response_url: str, text: str) -> None:
+def post_ephemeral_ack(response_url: str, text: str) -> None:
     """Post immediate acknowledgement via response_url (no SDK needed)."""
     import httpx
     httpx.post(response_url, json={
