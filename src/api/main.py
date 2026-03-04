@@ -1,15 +1,23 @@
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI
+from src.api.routes.slack import router as slack_router
+from src.core.logging import get_logger
 
-app = FastAPI()
+logger = get_logger(__name__)
 
-@app.get("/")
-def read_root():
-    return {"status": "ready"}
+app = FastAPI(
+    title="Slack AI Data Bot",
+    description="Natural language to SQL bot for Slack",
+    version="1.0.0"
+)
 
-@app.post("/slack/command")
-def xyz():
-    ...
+app.include_router(slack_router, prefix="/slack", tags=["slack"])
 
-@app.post("/slack/interactions")
-def abc():
-    ...
+
+@app.get("/health")
+def health():
+    return {"status": "ok"}
+
+
+@app.on_event("startup")
+async def startup():
+    logger.info("Slack AI Data Bot starting up...")
