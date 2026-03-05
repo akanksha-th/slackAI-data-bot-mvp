@@ -92,7 +92,7 @@ Two endpoints:
 | Endpoint | Purpose |
 |---|---|
 | `POST /slack/command` | Receives `/ask-data` slash commands |
-| `POST /slack/interact` | Receives button click callbacks (CSV export) |
+| `POST /slack/interactions` | Receives button click callbacks (CSV export) |
 
 Both endpoints verify the Slack request signature (HMAC-SHA256) before processing. Both return HTTP 200 immediately and delegate work to `BackgroundTasks` to avoid Slack's 3-second timeout.
 
@@ -148,7 +148,7 @@ The retry node passes the SQL error message back to the LLM in the next prompt, 
 ## 7. Caching Strategy
 
 ```
-Cache Key:   sha256("show revenue by region for 2025-09-01")
+Cache Key:   md5("show revenue by region for 2025-09-01")
 Cache Value: {"sql": "SELECT region...", "rows": [{...}, ...]}
 TTL:         7200s
 
