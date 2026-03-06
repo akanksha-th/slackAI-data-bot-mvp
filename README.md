@@ -5,8 +5,9 @@ A minimal slack app that turns a natural language question into SQL.
 
 ## Demo
 
-> `/ask-data show revenue by region for 2025-09-01`
+![Alt text](slackAIbot_mvp_demo.mp4)
 
+> `/ask-data show revenue by region for 2025-09-01`
 The bot replies instantly with a formatted table and an **Export CSV** button.
 
 ---
